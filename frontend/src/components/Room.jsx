@@ -1,14 +1,24 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'react-router'
 import Peer from 'peerjs'
 import { v4 as UUIDv4 } from 'uuid'
 import { usePeerStore } from '../store/PeerStore'
 import { useSocketStore } from '../store/SocketStore'
+import { userPeersStore } from '../store/PeersStores'
+import UserFeed from './UserFeed'
+import {
+  fetchLocalMediaStream,
+  handleGetUsers,
+  handleIncomingCall,
+  handleUserJoined,
+} from '../utils/fetchLocalMediaStream'
 
 function Room() {
+  const [peerStream, setPeerStream] = useState(null)
   const { id } = useParams()
   const { peer, setPeer } = usePeerStore()
   const { socket } = useSocketStore()
+  const { peers, addPeerStream, removePeerStream } = userPeersStore()
 
   useEffect(() => {
     console.log('New peer in new room')
@@ -20,8 +30,9 @@ function Room() {
       secure: false,
     })
 
-    newPeer.on('open', (id) => {
-      setPeer(id)
+    newPeer.on('open', () => {
+      setPeer(newPeer)
+      fetchLocalMediaStream(setPeerStream)
     })
 
     return () => {
@@ -33,15 +44,15 @@ function Room() {
     if (!peer || !socket || !id) {
       return
     }
+
+    // Notify server that we're joining this room with our peer ID
     const currentSocket = socket
-    currentSocket.emit('join-room', { joinedrRoomId: id, peerId: peer })
+    currentSocket.emit('join-room', { joinedrRoomId: id, peerId: peer.id })
 
-    const handleGetUsers = ({ rooms, participants }) => {
-      console.log('Room: ', rooms)
-      console.log('Participants: ', participants)
-    }
-
-    currentSocket.on('get-users', handleGetUsers)
+    // Listen for server response with current participants in the room
+    currentSocket.on('get-users', ({ rooms, participants }) => {
+      handleGetUsers({ rooms, participants })
+    })
 
     return () => {
       if (currentSocket && typeof currentSocket.off === 'function') {
@@ -52,7 +63,54 @@ function Room() {
     }
   }, [peer, socket, id])
 
-  return <div>User joined the room with id: {id}</div>
+  useEffect(() => {
+    if (!peer || !peerStream || !socket) return
+
+    const onUserJoined = ({ peerId }) => {
+      // Below function is responsible for initiating a call when a new user joins
+      handleUserJoined(
+        peer,
+        peerId,
+        peerStream,
+        addPeerStream,
+        removePeerStream,
+      )
+    }
+
+    // Listen for when new users join the room (server notifies us)
+    socket.on('user-joined', onUserJoined)
+
+    // Handle incoming calls from newly joined users when we join the room
+    function onCall(call) {
+      handleIncomingCall(call, peerStream, addPeerStream, removePeerStream)
+    }
+
+    peer.on('call', onCall)
+    socket.emit('ready')
+
+    return () => {
+      if (socket && typeof socket.off === 'function') {
+        socket.off('user-joined', onUserJoined)
+      }
+    }
+  }, [peer, peerStream, socket, addPeerStream, removePeerStream])
+
+  return (
+    <div>
+      room : {id}
+      <br />
+      Your own user feed:
+      <UserFeed stream={peerStream} />
+      <div>
+        Other Users feed:
+        {Object.keys(peers).map((peerId) => (
+          <>
+            <UserFeed key={peerId} stream={peers[peerId]} />
+          </>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export default Room
