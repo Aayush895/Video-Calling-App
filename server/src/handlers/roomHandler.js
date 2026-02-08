@@ -1,7 +1,7 @@
 import { v4 as UUIDv4 } from 'uuid'
 
+const rooms = {}
 export function roomHandler(socket) {
-  const rooms = {}
   const roomId = UUIDv4()
 
   function createRoom() {
@@ -11,20 +11,20 @@ export function roomHandler(socket) {
     socket.emit('room-created', { roomId })
   }
 
-  function joinRoom({ roomId, peerId }) {
-    if (rooms[roomId]) {
-      rooms[roomId].push(peerId)
-      socket.join(roomId)
+  function joinRoom({ joinedrRoomId, peerId }) {
+    if (rooms[joinedrRoomId]) {
+      rooms[joinedrRoomId].push(peerId)
+      socket.join(joinedrRoomId)
 
       socket.on('ready', () => {
-        socket.to(roomId).emit('user-joined', { peerId })
+        socket.to(joinedrRoomId).emit('user-joined', { peerId })
       })
 
       console.log('Users in rooms: ', rooms)
 
       socket.emit('get-users', {
-        roomId,
-        participants: rooms[roomId],
+        rooms,
+        participants: rooms[joinedrRoomId],
       })
     }
   }
